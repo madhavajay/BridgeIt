@@ -114,26 +114,52 @@ def langs() -> list[str]:
     return available
 
 
-def install(language: str, *, force: bool = False) -> str:
+def install(
+    language: str, *, force: bool = False, dry_run: bool = False, step: int | None = None
+) -> str:
     """
     Install kernelspec for a language.
 
     Args:
         language: Language name (e.g., "rust", "mojo")
         force: Force reinstallation even if already installed
+        dry_run: Show installation steps without running them
+        step: Optional step number to run a specific step only (e.g., 1, 2, 3)
 
     Returns:
-        Path to the installed kernelspec directory
+        Path to the installed kernelspec directory (empty string for dry_run)
     """
     language_key = language.lower()
     config = LANGUAGE_CONFIGS.get(language_key)
     if config is None:
         raise ValueError(f"Unknown language {language!r}. Known: {available_languages()}")
 
+    # Handle dry_run
+    if dry_run:
+        from . import installers
+
+        print(f"\n{language.title()} Installation Steps:")
+        print("=" * 50)
+        if language_key == "rust":
+            steps = installers.get_rust_steps()
+        elif language_key == "mojo":
+            steps = installers.get_mojo_steps()
+        else:
+            print(f"No step information available for {language}")
+            return ""
+
+        for i, step_desc in enumerate(steps, 1):
+            print(f"  Step {i}/{len(steps)}: {step_desc}")
+        print("\nUsage:")
+        print(f"  bridgeit.install('{language}')              # Run all steps")
+        print(f"  bridgeit.install('{language}', step=N)      # Run specific step")
+        print(f"  bridgeit.install('{language}', force=True)  # Force reinstall")
+        return ""
+
     manager = _ensure_kernelspec_manager()
 
-    # Check if already installed (skip if forcing)
-    if not force:
+    # Check if already installed (skip if forcing or running specific step)
+    if not force and step is None:
         try:
             spec = manager.get_kernel_spec(config.kernelspec_name)
             resource_dir: str = spec.resource_dir
@@ -142,7 +168,9 @@ def install(language: str, *, force: bool = False) -> str:
         except KeyError:
             pass
 
-    if force:
+    if step is not None:
+        print(f"Running {language.title()} installation step {step}...")
+    elif force:
         print(f"Force reinstalling {language.title()} kernelspec...")
     else:
         print(f"Installing {language.title()} kernelspec...")
@@ -154,17 +182,27 @@ def install(language: str, *, force: bool = False) -> str:
             "Provide `kernelspec_dir` or `install_commands`."
         )
 
+    # Build command with step parameter if provided
     for i, command in enumerate(commands, 1):
-        print(f"  [{i}/{len(commands)}] Running: {' '.join(command)}")
+        cmd_list = list(command)
+        if step is not None:
+            cmd_list.extend(["--step", str(step)])
+
+        print(f"  [{i}/{len(commands)}] Running: {' '.join(cmd_list)}")
         proc = subprocess.run(
-            tuple(command),
+            tuple(cmd_list),
             text=True,
             check=False,
         )
         if proc.returncode:
             raise RuntimeError(
-                f"Install command {tuple(command)!r} failed with status {proc.returncode}"
+                f"Install command {tuple(cmd_list)!r} failed with status {proc.returncode}"
             )
+
+    # Skip verification if running specific step (not complete installation)
+    if step is not None:
+        print(f"✓ {language.title()} step {step} complete")
+        return ""
 
     try:
         spec = manager.get_kernel_spec(config.kernelspec_name)
