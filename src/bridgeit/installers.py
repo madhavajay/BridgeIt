@@ -33,8 +33,7 @@ def _run_with_progress(
 
     # Try to use IPython display for better progress indication
     try:
-        from IPython.display import display
-        from IPython.display import HTML
+        from IPython.display import HTML, display
 
         ipython_available = True
     except ImportError:
@@ -64,10 +63,9 @@ def _run_with_progress(
 
             if ipython_available and count % 2 == 0:  # Update every ~1 second for IPython
                 try:
-                    display(
-                        HTML(
-                            f'<span style="color: #888;">Running... '
-                            f"{mins}m {secs}s elapsed</span>"
+                    display(  # type: ignore[no-untyped-call]
+                        HTML(  # type: ignore[no-untyped-call]
+                            f'<span style="color: #888;">Running... {mins}m {secs}s elapsed</span>'
                         ),
                         display_id="progress",
                     )
