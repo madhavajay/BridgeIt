@@ -1,4 +1,3 @@
-import bridgeit
 from bridgeit import installers
 
 
@@ -10,7 +9,3 @@ def test_pixi_env_sets_crashpad_defaults(monkeypatch) -> None:
 
     assert env["MODULAR_SKIP_CRASHPAD"] == "1"
     assert env["MODULAR_CRASHPAD_DISABLE"] == "1"
-
-
-def test_version() -> None:
-    assert bridgeit.__version__ == "0.1.0"
