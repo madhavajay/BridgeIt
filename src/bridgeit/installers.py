@@ -37,12 +37,12 @@ def _run_with_progress(
 
     # Try to use IPython display for better progress indication
     try:
-        from IPython import get_ipython  # type: ignore[import-not-found]
-        from IPython.display import HTML, display  # type: ignore[import-not-found]
-
-        ipython_available = get_ipython() is not None
+        from IPython import get_ipython
+        from IPython.display import HTML, display
     except ImportError:
         ipython_available = False
+    else:
+        ipython_available = get_ipython() is not None
 
     cmd_tuple = tuple(command)
 
@@ -67,8 +67,11 @@ def _run_with_progress(
                 bufsize=1,
             )
 
+            if proc.stdout is None:  # pragma: no cover - defensive; PIPE requested
+                raise RuntimeError("stdout pipe unexpectedly unavailable")
+
             stdout_lines = []
-            for line in iter(proc.stdout.readline, ""):  # type: ignore[union-attr]
+            for line in iter(proc.stdout.readline, ""):
                 sys.stdout.write(indent + line)
                 sys.stdout.flush()
                 stdout_lines.append(line)
@@ -104,8 +107,8 @@ def _run_with_progress(
                     if ipython_available and count % 2 == 0:
                         try:
                             progress_text = f"Running... {mins}m {secs}s elapsed"
-                            display(  # type: ignore[no-untyped-call]
-                                HTML(  # type: ignore[no-untyped-call]
+                            display(
+                                HTML(
                                     f"<span style='color: #888;'>{progress_text}</span>"
                                 ),
                                 display_id="progress",
