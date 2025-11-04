@@ -33,6 +33,7 @@ class LanguageConfig:
     fallback_file_arg: str = "{file}"
     fallback_file_suffix: str = ".tmp"
     install_commands: Sequence[Sequence[str]] = field(default_factory=tuple)
+    startup_timeout: float = 30.0
 
 
 LANGUAGE_CONFIGS: dict[str, LanguageConfig] = {
@@ -41,6 +42,7 @@ LANGUAGE_CONFIGS: dict[str, LanguageConfig] = {
         kernelspec_name="rust",
         fallback_command=("evcxr",),
         install_commands=(("python", "-m", "bridgeit.installers", "rust"),),
+        startup_timeout=150.0,
     ),
     "mojo": LanguageConfig(
         magic_name="mojo",
@@ -50,6 +52,7 @@ LANGUAGE_CONFIGS: dict[str, LanguageConfig] = {
         fallback_via_file=True,
         fallback_file_suffix=".mojo",
         install_commands=(("python", "-m", "bridgeit.installers", "mojo"),),
+        startup_timeout=120.0,
     ),
 }
 
@@ -242,7 +245,7 @@ def use(language: str) -> None:
     kernel = config.kernelspec_name
     handler = make_kernelspec_runner(
         kernel_name=kernel,
-        startup_timeout=30.0,
+        startup_timeout=config.startup_timeout,
     )
     register_magic(magic_name=magic, handler=handler)
     print(f"{language.title()} enabled. Add %%{magic} to your cells to use it.")
