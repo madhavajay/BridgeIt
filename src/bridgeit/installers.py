@@ -15,6 +15,7 @@ import sys
 import threading
 from collections.abc import Sequence
 from pathlib import Path
+from typing import TextIO
 
 
 def _run_with_progress(
@@ -24,6 +25,9 @@ def _run_with_progress(
     env: dict[str, str] | None = None,
     indent: str = "    ",
     interval: float = 0.5,
+    show_output: bool = False,
+    use_nohup: bool = False,
+    log_path: str | Path | None = None,
 ) -> tuple[str, str]:
     """Run ``command`` suppressing output while emitting a heartbeat.
 
@@ -33,74 +37,122 @@ def _run_with_progress(
 
     # Try to use IPython display for better progress indication
     try:
-        from IPython.display import HTML, display
+        from IPython import get_ipython  # type: ignore[import-not-found]
+        from IPython.display import HTML, display  # type: ignore[import-not-found]
 
-        ipython_available = True
+        ipython_available = get_ipython() is not None
     except ImportError:
         ipython_available = False
 
     cmd_tuple = tuple(command)
-    proc = subprocess.Popen(  # noqa: PLW1510 - intentional manual management
-        cmd_tuple,
-        cwd=str(cwd) if isinstance(cwd, Path) else cwd,
-        env=env,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-    )
 
-    done = threading.Event()
-    printed = False
-    start_time = time.time()
+    if use_nohup and os.name != "nt":
+        cmd_tuple = ("nohup",) + cmd_tuple
 
-    def spinner() -> None:
-        nonlocal printed
-        count = 0
-        while not done.wait(interval):
-            count += 1
-            elapsed = int(time.time() - start_time)
-            mins, secs = divmod(elapsed, 60)
+    log_file: TextIO | None = None
+    if log_path is not None:
+        log_file_path = Path(log_path).expanduser()
+        log_file_path.parent.mkdir(parents=True, exist_ok=True)
+        log_file = log_file_path.open("a", encoding="utf-8")
 
-            if ipython_available and count % 2 == 0:  # Update every ~1 second for IPython
-                try:
-                    display(  # type: ignore[no-untyped-call]
-                        HTML(  # type: ignore[no-untyped-call]
-                            f'<span style="color: #888;">Running... {mins}m {secs}s elapsed</span>'
-                        ),
-                        display_id="progress",
-                    )
-                except Exception:  # pragma: no cover
-                    pass
-
-            if indent and not printed:
-                sys.stdout.write(indent)
-            sys.stdout.write(".")
-            sys.stdout.flush()
-            printed = True
-
-    thread = threading.Thread(target=spinner, daemon=True)
-    thread.start()
-
-    stdout, stderr = proc.communicate()
-    done.set()
-    thread.join()
-
-    if printed:
-        sys.stdout.write("\n")
-        sys.stdout.flush()
-
-    if proc.returncode:
-        if stdout:
-            print(stdout, end="" if stdout.endswith("\n") else "\n")
-        if stderr:
-            print(
-                stderr,
-                file=sys.stderr,
-                end="" if stderr.endswith("\n") else "\n",
+    try:
+        if show_output:
+            proc = subprocess.Popen(  # noqa: PLW1510 - intentional manual management
+                cmd_tuple,
+                cwd=str(cwd) if isinstance(cwd, Path) else cwd,
+                env=env,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                bufsize=1,
             )
-        raise RuntimeError(f"Command {cmd_tuple!r} failed with exit code {proc.returncode}")
 
-    return stdout or "", stderr or ""
+            stdout_lines = []
+            for line in iter(proc.stdout.readline, ""):  # type: ignore[union-attr]
+                sys.stdout.write(indent + line)
+                sys.stdout.flush()
+                stdout_lines.append(line)
+                if log_file is not None:
+                    log_file.write(line)
+                    log_file.flush()
+
+            proc.wait()
+            stdout = "".join(stdout_lines)
+            stderr = ""
+        else:
+            proc = subprocess.Popen(  # noqa: PLW1510 - intentional manual management
+                cmd_tuple,
+                cwd=str(cwd) if isinstance(cwd, Path) else cwd,
+                env=env,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+
+            done = threading.Event()
+            printed = False
+            start_time = time.time()
+
+            def spinner() -> None:
+                nonlocal printed
+                count = 0
+                while not done.wait(interval):
+                    count += 1
+                    elapsed = int(time.time() - start_time)
+                    mins, secs = divmod(elapsed, 60)
+
+                    if ipython_available and count % 2 == 0:
+                        try:
+                            display(  # type: ignore[no-untyped-call]
+                                HTML(  # type: ignore[no-untyped-call]
+                                    "<span style=\"color: #888;\">"
+                                    f"Running... {mins}m {secs}s elapsed"
+                                    "</span>"
+                                ),
+                                display_id="progress",
+                            )
+                        except Exception:  # pragma: no cover
+                            pass
+
+                    if indent and not printed:
+                        sys.stdout.write(indent)
+                    sys.stdout.write(".")
+                    sys.stdout.flush()
+                    printed = True
+
+            thread = threading.Thread(target=spinner, daemon=True)
+            thread.start()
+
+            stdout, stderr = proc.communicate()
+            done.set()
+            thread.join()
+
+            if printed:
+                sys.stdout.write("\n")
+                sys.stdout.flush()
+
+            if log_file is not None:
+                if stdout:
+                    log_file.write(stdout)
+                if stderr:
+                    log_file.write(stderr)
+                log_file.flush()
+
+        if proc.returncode:
+            if stdout:
+                print(stdout, end="" if stdout.endswith("\n") else "\n")
+            if stderr:
+                print(
+                    stderr,
+                    file=sys.stderr,
+                    end="" if stderr.endswith("\n") else "\n",
+                )
+            raise RuntimeError(f"Command {cmd_tuple!r} failed with exit code {proc.returncode}")
+
+        return stdout or "", stderr or ""
+    finally:
+        if log_file is not None:
+            log_file.close()
 
 
 def _cargo_env() -> dict[str, str]:
@@ -159,10 +211,15 @@ def _rust_step_2(env: dict[str, str]) -> None:
         flush=True,
     )
     print("    Running: cargo install evcxr_jupyter", flush=True)
+    log_path = Path.home() / ".bridgeit" / "logs" / "cargo_evcxr_install.log"
+    print(f"    Logging output to {log_path}", flush=True)
     _run_with_progress(
         ["cargo", "install", "evcxr_jupyter", "--locked", "--force"],
         env=env,
         indent="      ",
+        show_output=True,
+        use_nohup=os.name != "nt",
+        log_path=log_path,
     )
     print("    ✓ evcxr_jupyter installed", flush=True)
     print("    ✓ Step 2/3 complete", flush=True)
@@ -290,11 +347,16 @@ def _mojo_step_3(env: dict[str, str], project_dir: Path) -> None:
 def _mojo_step_4(env: dict[str, str], project_dir: Path, mojo_version: str) -> None:
     """Step 4/7: Add mojo package to environment."""
     print(f"  → Step 4/7: Adding mojo=={mojo_version} to environment...", flush=True)
+    log_path = Path.home() / ".bridgeit" / "logs" / "pixi_add_mojo.log"
+    print(f"    Logging output to {log_path}", flush=True)
     _run_with_progress(
         ["pixi", "add", f"mojo=={mojo_version}"],
         cwd=project_dir,
         env=env,
         indent="      ",
+        show_output=True,
+        use_nohup=os.name != "nt",
+        log_path=log_path,
     )
     print("    ✓ Mojo package added", flush=True)
     print("    ✓ Step 4/7 complete", flush=True)
@@ -303,11 +365,16 @@ def _mojo_step_4(env: dict[str, str], project_dir: Path, mojo_version: str) -> N
 def _mojo_step_5(env: dict[str, str], project_dir: Path) -> None:
     """Step 5/7: Add jupyterlab to environment."""
     print("  → Step 5/7: Adding jupyterlab to environment...", flush=True)
+    log_path = Path.home() / ".bridgeit" / "logs" / "pixi_add_jupyterlab.log"
+    print(f"    Logging output to {log_path}", flush=True)
     _run_with_progress(
         ["pixi", "add", "jupyterlab"],
         cwd=project_dir,
         env=env,
         indent="      ",
+        show_output=True,
+        use_nohup=os.name != "nt",
+        log_path=log_path,
     )
     print("    ✓ JupyterLab added", flush=True)
     print("    ✓ Step 5/7 complete", flush=True)
@@ -316,11 +383,16 @@ def _mojo_step_5(env: dict[str, str], project_dir: Path) -> None:
 def _mojo_step_6(env: dict[str, str], project_dir: Path) -> None:
     """Step 6/7: Install pixi environment (download packages)."""
     print("  → Step 6/7: Installing pixi environment (downloading packages)...", flush=True)
+    log_path = Path.home() / ".bridgeit" / "logs" / "pixi_install.log"
+    print(f"    Logging output to {log_path}", flush=True)
     _run_with_progress(
         ["pixi", "install"],
         cwd=project_dir,
         env=env,
         indent="      ",
+        show_output=True,
+        use_nohup=os.name != "nt",
+        log_path=log_path,
     )
     print("    ✓ Environment installed", flush=True)
     print("    ✓ Step 6/7 complete", flush=True)
