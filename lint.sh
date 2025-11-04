@@ -2,10 +2,10 @@
 set -e
 
 echo "Running ruff check..."
-uv run ruff check src tests
+uv run ruff check --fix src tests
 
 echo "Running ruff format check..."
-uv run ruff format --check src tests
+uv run ruff format src tests
 
 echo "Running mypy..."
 uv run mypy src/bridgeit

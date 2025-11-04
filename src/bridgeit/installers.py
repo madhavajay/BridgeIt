@@ -7,15 +7,16 @@ than a kernelspec copy. Each installer should be idempotent and safe to re-run.
 from __future__ import annotations
 
 import argparse
+import importlib
 import json
 import os
 import shutil
 import subprocess
 import sys
 import threading
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from pathlib import Path
-from typing import TextIO
+from typing import Any, TextIO
 
 
 def _run_with_progress(
@@ -36,13 +37,29 @@ def _run_with_progress(
     import time
 
     # Try to use IPython display for better progress indication
+    ipython_available = False
+    display_func: Callable[..., Any] | None = None
+    html_factory: Callable[..., Any] | None = None
+
     try:
-        from IPython import get_ipython
-        from IPython.display import HTML, display
+        ipython_module = importlib.import_module("IPython")
+        display_module = importlib.import_module("IPython.display")
     except ImportError:
-        ipython_available = False
+        pass
     else:
-        ipython_available = get_ipython() is not None
+        get_ipython_func = getattr(ipython_module, "get_ipython", None)
+        display_candidate = getattr(display_module, "display", None)
+        html_candidate = getattr(display_module, "HTML", None)
+
+        if callable(display_candidate) and callable(html_candidate):
+            display_func = display_candidate
+            html_factory = html_candidate
+
+        if callable(get_ipython_func):
+            try:
+                ipython_available = bool(get_ipython_func())
+            except Exception:  # pragma: no cover - defensive fallback
+                ipython_available = False
 
     cmd_tuple = tuple(command)
 
@@ -104,13 +121,16 @@ def _run_with_progress(
                     elapsed = int(time.time() - start_time)
                     mins, secs = divmod(elapsed, 60)
 
-                    if ipython_available and count % 2 == 0:
+                    if (
+                        ipython_available
+                        and display_func is not None
+                        and html_factory is not None
+                        and count % 2 == 0
+                    ):
                         try:
                             progress_text = f"Running... {mins}m {secs}s elapsed"
-                            display(
-                                HTML(
-                                    f"<span style='color: #888;'>{progress_text}</span>"
-                                ),
+                            display_func(
+                                html_factory(f"<span style='color: #888;'>{progress_text}</span>"),
                                 display_id="progress",
                             )
                         except Exception:  # pragma: no cover
