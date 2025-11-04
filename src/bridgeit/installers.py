@@ -103,11 +103,10 @@ def _run_with_progress(
 
                     if ipython_available and count % 2 == 0:
                         try:
+                            progress_text = f"Running... {mins}m {secs}s elapsed"
                             display(  # type: ignore[no-untyped-call]
                                 HTML(  # type: ignore[no-untyped-call]
-                                    "<span style=\"color: #888;\">"
-                                    f"Running... {mins}m {secs}s elapsed"
-                                    "</span>"
+                                    f"<span style='color: #888;'>{progress_text}</span>"
                                 ),
                                 display_id="progress",
                             )
