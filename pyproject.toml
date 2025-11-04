@@ -8,14 +8,12 @@ version = "0.1.0"
 description = "A modern Python library"
 readme = "README.md"
 requires-python = ">=3.12"
-license = {text = "MIT"}
-authors = [
-    {name = "Your Name", email = "your.email@example.com"}
-]
+license = { text = "Apache-2.0" }
+authors = [{ name = "Madhava Jay", email = "me@madhavajay.com" }]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
-    "License :: OSI Approved :: MIT License",
+    "License :: OSI Approved :: Apache Software License",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
@@ -24,17 +22,12 @@ classifiers = [
 dependencies = []
 
 [project.optional-dependencies]
-dev = [
-    "pytest>=8.0.0",
-    "pytest-cov>=4.1.0",
-    "mypy>=1.8.0",
-    "ruff>=0.3.0",
-]
+dev = ["pytest>=8.0.0", "pytest-cov>=4.1.0", "mypy>=1.8.0", "ruff>=0.3.0"]
 
 [project.urls]
-Homepage = "https://github.com/yourusername/bridgeit"
-Repository = "https://github.com/yourusername/bridgeit"
-Issues = "https://github.com/yourusername/bridgeit/issues"
+Homepage = "https://github.com/madhavajay/bridgeit"
+Repository = "https://github.com/madhavajay/bridgeit"
+Issues = "https://github.com/madhavajay/bridgeit/issues"
 
 [dependency-groups]
 dev = [
@@ -70,8 +63,4 @@ testpaths = ["tests"]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
-addopts = [
-    "--strict-markers",
-    "--cov=bridgeit",
-    "--cov-report=term-missing",
-]
+addopts = ["--strict-markers", "--cov=bridgeit", "--cov-report=term-missing"]

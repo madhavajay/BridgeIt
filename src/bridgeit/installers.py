@@ -23,9 +23,21 @@ def _run_with_progress(
     cwd: str | Path | None = None,
     env: dict[str, str] | None = None,
     indent: str = "    ",
-    interval: float = 2.5,
+    interval: float = 0.5,
 ) -> tuple[str, str]:
-    """Run ``command`` suppressing output while emitting a heartbeat."""
+    """Run ``command`` suppressing output while emitting a heartbeat.
+
+    Uses aggressive heartbeat (0.5s default) to prevent notebook timeouts.
+    """
+    import time
+
+    # Try to use IPython display for better progress indication
+    try:
+        from IPython.display import HTML, display
+
+        ipython_available = True
+    except ImportError:
+        ipython_available = False
 
     cmd_tuple = tuple(command)
     proc = subprocess.Popen(  # noqa: PLW1510 - intentional manual management
@@ -39,10 +51,27 @@ def _run_with_progress(
 
     done = threading.Event()
     printed = False
+    start_time = time.time()
 
     def spinner() -> None:
         nonlocal printed
+        count = 0
         while not done.wait(interval):
+            count += 1
+            elapsed = int(time.time() - start_time)
+            mins, secs = divmod(elapsed, 60)
+
+            if ipython_available and count % 2 == 0:  # Update every ~1 second for IPython
+                try:
+                    display(  # type: ignore[no-untyped-call]
+                        HTML(  # type: ignore[no-untyped-call]
+                            f'<span style="color: #888;">Running... {mins}m {secs}s elapsed</span>'
+                        ),
+                        display_id="progress",
+                    )
+                except Exception:  # pragma: no cover
+                    pass
+
             if indent and not printed:
                 sys.stdout.write(indent)
             sys.stdout.write(".")
@@ -91,8 +120,17 @@ def _command_exists(cmd: str, env: dict[str, str]) -> bool:
     return shutil.which(cmd, path=env.get("PATH")) is not None
 
 
-def install_rust() -> None:
-    """Install Rust toolchain and evcxr_jupyter kernelspec."""
+def get_rust_steps() -> list[str]:
+    """Get list of Rust installation step descriptions."""
+    return [
+        "Check and install Rust toolchain (rustup)",
+        "Install evcxr_jupyter kernel (cargo install - may take 5-10 minutes)",
+        "Register Jupyter kernelspec",
+    ]
+
+
+def _rust_step_1() -> dict[str, str]:
+    """Step 1/3: Check and install Rust toolchain."""
     print("  → Step 1/3: Checking Rust toolchain...", flush=True)
     env = _cargo_env()
 
@@ -110,6 +148,12 @@ def install_rust() -> None:
     if not _command_exists("cargo", env):
         raise RuntimeError("Cargo missing after rustup installation; aborting.")
 
+    print("    ✓ Step 1/3 complete", flush=True)
+    return env
+
+
+def _rust_step_2(env: dict[str, str]) -> None:
+    """Step 2/3: Install evcxr_jupyter kernel."""
     print(
         "  → Step 2/3: Installing evcxr_jupyter kernel (this may take a few minutes)...",
         flush=True,
@@ -120,9 +164,12 @@ def install_rust() -> None:
         env=env,
         indent="      ",
     )
-
     print("    ✓ evcxr_jupyter installed", flush=True)
+    print("    ✓ Step 2/3 complete", flush=True)
 
+
+def _rust_step_3(env: dict[str, str]) -> None:
+    """Step 3/3: Register Jupyter kernelspec."""
     print("  → Step 3/3: Registering Jupyter kernelspec...", flush=True)
     _run_with_progress(
         [
@@ -133,6 +180,31 @@ def install_rust() -> None:
         indent="      ",
     )
     print("    ✓ Kernelspec registered", flush=True)
+    print("    ✓ Step 3/3 complete", flush=True)
+
+
+def install_rust(step: int | None = None) -> None:
+    """Install Rust toolchain and evcxr_jupyter kernelspec.
+
+    Args:
+        step: Optional step number (1-3) to run a specific step only.
+              If None, runs all steps.
+    """
+    if step is None:
+        # Run all steps
+        env = _rust_step_1()
+        _rust_step_2(env)
+        _rust_step_3(env)
+    elif step == 1:
+        _rust_step_1()
+    elif step == 2:
+        env = _cargo_env()
+        _rust_step_2(env)
+    elif step == 3:
+        env = _cargo_env()
+        _rust_step_3(env)
+    else:
+        raise ValueError(f"Invalid step {step}. Rust installation has 3 steps (1-3).")
 
 
 def _pixi_env() -> dict[str, str]:
@@ -160,20 +232,39 @@ def _ensure_pixi(env: dict[str, str]) -> None:
         raise RuntimeError("Pixi installation failed; 'pixi' not found on PATH.")
 
 
-def install_mojo(mojo_version: str = "0.25.6") -> None:
-    """Install Mojo toolchain and kernelspec using pixi."""
+def get_mojo_steps() -> list[str]:
+    """Get list of Mojo installation step descriptions."""
+    return [
+        "Set up pixi environment",
+        "Create pixi project directory",
+        "Initialize pixi project",
+        "Add mojo package to environment (may take 2-5 minutes)",
+        "Add jupyterlab to environment (may take 2-5 minutes)",
+        "Install pixi environment - download packages (may take 5-15 minutes)",
+        "Finalize Mojo setup and install kernelspec",
+    ]
 
-    from . import magics
 
+def _mojo_step_1() -> tuple[dict[str, str], Path]:
+    """Step 1/7: Set up pixi environment."""
     print("  → Step 1/7: Setting up pixi environment...", flush=True)
     env = _pixi_env()
     _ensure_pixi(env)
-
-    print("  → Step 2/7: Creating pixi project directory...", flush=True)
     project_dir = Path.home() / ".bridgeit" / "mojo-pixi"
+    print("    ✓ Step 1/7 complete", flush=True)
+    return env, project_dir
+
+
+def _mojo_step_2(env: dict[str, str], project_dir: Path) -> None:
+    """Step 2/7: Create pixi project directory."""
+    print("  → Step 2/7: Creating pixi project directory...", flush=True)
     project_dir.mkdir(parents=True, exist_ok=True)
     print(f"    Using project directory: {project_dir}", flush=True)
+    print("    ✓ Step 2/7 complete", flush=True)
 
+
+def _mojo_step_3(env: dict[str, str], project_dir: Path) -> None:
+    """Step 3/7: Initialize pixi project."""
     pixi_toml = project_dir / "pixi.toml"
     if not pixi_toml.exists():
         print("  → Step 3/7: Initializing pixi project...", flush=True)
@@ -193,7 +284,11 @@ def install_mojo(mojo_version: str = "0.25.6") -> None:
         print("    ✓ Project initialized", flush=True)
     else:
         print("  → Step 3/7: Pixi project already initialized", flush=True)
+    print("    ✓ Step 3/7 complete", flush=True)
 
+
+def _mojo_step_4(env: dict[str, str], project_dir: Path, mojo_version: str) -> None:
+    """Step 4/7: Add mojo package to environment."""
     print(f"  → Step 4/7: Adding mojo=={mojo_version} to environment...", flush=True)
     _run_with_progress(
         ["pixi", "add", f"mojo=={mojo_version}"],
@@ -202,7 +297,11 @@ def install_mojo(mojo_version: str = "0.25.6") -> None:
         indent="      ",
     )
     print("    ✓ Mojo package added", flush=True)
+    print("    ✓ Step 4/7 complete", flush=True)
 
+
+def _mojo_step_5(env: dict[str, str], project_dir: Path) -> None:
+    """Step 5/7: Add jupyterlab to environment."""
     print("  → Step 5/7: Adding jupyterlab to environment...", flush=True)
     _run_with_progress(
         ["pixi", "add", "jupyterlab"],
@@ -211,7 +310,11 @@ def install_mojo(mojo_version: str = "0.25.6") -> None:
         indent="      ",
     )
     print("    ✓ JupyterLab added", flush=True)
+    print("    ✓ Step 5/7 complete", flush=True)
 
+
+def _mojo_step_6(env: dict[str, str], project_dir: Path) -> None:
+    """Step 6/7: Install pixi environment (download packages)."""
     print("  → Step 6/7: Installing pixi environment (downloading packages)...", flush=True)
     _run_with_progress(
         ["pixi", "install"],
@@ -220,6 +323,12 @@ def install_mojo(mojo_version: str = "0.25.6") -> None:
         indent="      ",
     )
     print("    ✓ Environment installed", flush=True)
+    print("    ✓ Step 6/7 complete", flush=True)
+
+
+def _mojo_step_7(env: dict[str, str], project_dir: Path) -> None:
+    """Step 7/7: Finalize Mojo setup and install kernelspec."""
+    from . import magics
 
     print("  → Step 7/7: Finalizing Mojo setup...", flush=True)
     print("    Validating Mojo CLI...", flush=True)
@@ -246,7 +355,6 @@ def install_mojo(mojo_version: str = "0.25.6") -> None:
     shim_dir.mkdir(parents=True, exist_ok=True)
     shim_path = shim_dir / "mojo"
 
-    # Use full path to pixi in the shim script
     pixi_path = shutil.which("pixi", path=env.get("PATH"))
     if not pixi_path:
         pixi_path = str(Path.home() / ".pixi" / "bin" / "pixi")
@@ -304,6 +412,50 @@ def install_mojo(mojo_version: str = "0.25.6") -> None:
     env_block.setdefault("MODULAR_CRASHPAD_DISABLE", "1")
     kernel_json.write_text(json.dumps(data, indent=2))
     print("    ✓ Kernelspec installed", flush=True)
+    print("    ✓ Step 7/7 complete", flush=True)
+
+
+def install_mojo(mojo_version: str = "0.25.6", step: int | None = None) -> None:
+    """Install Mojo toolchain and kernelspec using pixi.
+
+    Args:
+        mojo_version: Version of Mojo to install.
+        step: Optional step number (1-7) to run a specific step only.
+              If None, runs all steps.
+    """
+    project_dir = Path.home() / ".bridgeit" / "mojo-pixi"
+
+    if step is None:
+        # Run all steps
+        env, project_dir = _mojo_step_1()
+        _mojo_step_2(env, project_dir)
+        _mojo_step_3(env, project_dir)
+        _mojo_step_4(env, project_dir, mojo_version)
+        _mojo_step_5(env, project_dir)
+        _mojo_step_6(env, project_dir)
+        _mojo_step_7(env, project_dir)
+    elif step == 1:
+        _mojo_step_1()
+    elif step == 2:
+        env = _pixi_env()
+        _mojo_step_2(env, project_dir)
+    elif step == 3:
+        env = _pixi_env()
+        _mojo_step_3(env, project_dir)
+    elif step == 4:
+        env = _pixi_env()
+        _mojo_step_4(env, project_dir, mojo_version)
+    elif step == 5:
+        env = _pixi_env()
+        _mojo_step_5(env, project_dir)
+    elif step == 6:
+        env = _pixi_env()
+        _mojo_step_6(env, project_dir)
+    elif step == 7:
+        env = _pixi_env()
+        _mojo_step_7(env, project_dir)
+    else:
+        raise ValueError(f"Invalid step {step}. Mojo installation has 7 steps (1-7).")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -313,12 +465,18 @@ def main(argv: list[str] | None = None) -> int:
         choices=("rust", "mojo"),
         help="Language runtime to install.",
     )
+    parser.add_argument(
+        "--step",
+        type=int,
+        default=None,
+        help="Run a specific installation step (e.g., --step 1 for step 1)",
+    )
     args = parser.parse_args(argv)
 
     if args.language == "rust":
-        install_rust()
+        install_rust(step=args.step)
     elif args.language == "mojo":
-        install_mojo()
+        install_mojo(step=args.step)
     else:  # pragma: no cover - argparse choices protect this.
         raise ValueError(f"Unsupported language {args.language}")
 
