@@ -75,6 +75,28 @@ jobs:
         run: |
           ./bump_version.sh "${{ steps.new.outputs.version }}"
 
+      - name: Verify version bump
+        run: |
+          EXPECTED="${{ steps.new.outputs.version }}"
+          INIT_VERSION=$(grep '^__version__ = ' src/bridgeit/__init__.py | cut -d'"' -f2)
+          PYPROJECT_VERSION=$(grep '^version = ' pyproject.toml | cut -d'"' -f2)
+
+          echo "Expected version: $EXPECTED"
+          echo "__init__.py version: $INIT_VERSION"
+          echo "pyproject.toml version: $PYPROJECT_VERSION"
+
+          if [ "$INIT_VERSION" != "$EXPECTED" ]; then
+            echo "ERROR: __init__.py version mismatch!"
+            exit 1
+          fi
+
+          if [ "$PYPROJECT_VERSION" != "$EXPECTED" ]; then
+            echo "ERROR: pyproject.toml version mismatch!"
+            exit 1
+          fi
+
+          echo "✓ Version bump verified successfully"
+
       - name: Install dependencies
         run: uv sync --all-extras
 
