@@ -17,6 +17,11 @@ on:
         description: 'Custom version (only if bump=custom, e.g., 0.2.0)'
         required: false
         type: string
+      skip_docker_tests:
+        description: 'Skip Docker integration tests'
+        required: false
+        type: boolean
+        default: false
 
 jobs:
   publish:
@@ -77,9 +82,11 @@ jobs:
         run: uv run pytest
 
       - name: Set up Docker Buildx
+        if: ${{ !inputs.skip_docker_tests }}
         uses: docker/setup-buildx-action@v3
 
       - name: Build Docker image with cache
+        if: ${{ !inputs.skip_docker_tests }}
         uses: docker/build-push-action@v5
         with:
           context: .
@@ -91,6 +98,7 @@ jobs:
           cache-to: type=gha,mode=max
 
       - name: Run Docker integration tests
+        if: ${{ !inputs.skip_docker_tests }}
         run: bash test-docker.sh
         env:
           SKIP_DOCKER_BUILD: "1"
