@@ -49,11 +49,18 @@ sed -i.bak "s/__version__ = .*/__version__ = \"${NEW_VERSION}\"/" "$INIT_FILE"
 rm "${INIT_FILE}.bak"
 echo "✓ Updated $INIT_FILE"
 
+# Update pyproject.toml
+PYPROJECT_FILE="$REPO_ROOT/pyproject.toml"
+sed -i.bak "s/^version = .*/version = \"${NEW_VERSION}\"/" "$PYPROJECT_FILE"
+rm "${PYPROJECT_FILE}.bak"
+echo "✓ Updated $PYPROJECT_FILE"
+
 echo ""
 echo "✓ Version bump complete!"
 echo ""
 echo "Updated files:"
 echo "  - src/bridgeit/__init__.py"
+echo "  - pyproject.toml"
 echo ""
 echo "Next steps:"
 echo "  git add -A"
